@@ -2,7 +2,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
-from preprocess import Preprocess
+from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import LeaveOneOut
 
 from sklearn import linear_model, datasets, metrics
@@ -22,8 +22,7 @@ class Model:
     
     # create object storing path of data
     def __init__(self, data, label, model_name, test_size=0.2, random_state=0):
-        pre = Preprocess(data)
-        self.data = pre.normalization()
+        self.data = StandardScaler().fit(data).transform(data)
         # self.data = data
         self.label = label
         self.model_name = model_name
@@ -98,9 +97,10 @@ class LeaveOneOutModel:
     
     # create object storing path of data
     def __init__(self, X_train, X_test, Y_train, Y_test, model_name):
-        scaler = Preprocess(X_train)
-        self.X_train = scaler.normalization(X_train)
-        self.X_test = scaler.normalization(X_test)
+        self.scaler = StandardScaler()
+        self.scaler.fit(X_train)
+        self.X_train = self.scaler.transform(X_train)
+        self.X_test = self.scaler.transform(X_test)
         
         self.Y_train = Y_train
         self.Y_test = Y_test
@@ -251,4 +251,11 @@ class LeaveOneOutModel:
             confusion_matrix = pd.crosstab(df['y_Actual'], df['y_Predicted'], rownames= ['Actual'],     colnames=['Predicted'])
 
             plt.show()
-            sn.heatmap(confusion_matrix, annot=True)       
+            sn.heatmap(confusion_matrix, annot=True)
+
+    # get the index of false-positive image
+    def false_positive_index(self, clf, X_test, Y_test, threshold):
+        pred_proba_df = pd.DataFrame(clf.predict_proba(X_test)[:,1])
+        Y_test_pred = pred_proba_df.applymap(lambda x: 1 if x>threshold else 0).to_numpy().reshape( (pred_proba_df.shape[0]))
+        false_positives = np.logical_and(Y_test != Y_test_pred, Y_test_pred == 1)
+        return np.arange(len(Y_test))[false_positives]

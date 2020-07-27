@@ -1,4 +1,5 @@
 import numpy as np
+import cv2
 from skimage.filters import prewitt_h, prewitt_v, laplace
 
 
@@ -6,24 +7,33 @@ class Feature:
 
     
     # create new Feature object storing 4 images
-    def __init__(self, no_flash1, no_flash2, flash, lst_flash, n=5, boxsize=3, r=3):
+    # def __init__(self, lst_flash, lst_no_flash2, no_flash1, flash, no_flash2, n=5, boxsize=3, r=3, kernel_randium=5):
+    def __init__(self, lst_flash, lst_no_flash2, flash, no_flash2, n=5, boxsize=3, r=3, kernel_randium=5):
         self.n = n
         self.boxsize = boxsize
         self.r = r
-        self.locs = self.getmaxlocs(flash-no_flash2, n=self.n)
-        self.comb_img = [no_flash1, no_flash2, flash, flash-no_flash1, flash-no_flash2, flash-lst_flash]
+        # self.locs = self.getmaxlocs(flash-no_flash2, n=self.n)
+        self.locs = self.getmaxlocs_dilation(lst_flash, lst_no_flash2, flash, no_flash2, n, kernel_randium)
+        # self.comb_img = [no_flash1, no_flash2, flash, flash-no_flash1, flash-no_flash2, flash-lst_flash]
+        self.comb_img = [no_flash2, flash, flash-no_flash2, flash-lst_flash]
 
 
-    # get the top n brightest spots
-    def getmaxlocs(self, img, n):
+    # get the top 10 brightest spots with dilation
+    def getmaxlocs_dilation(self, f1, nf1, f2, nf2, n=10, blocksize=15, weights=None):
+        kernel = np.ones((blocksize, blocksize), np.uint8)
+        dilate_nf2 = cv2.dilate(nf2, kernel, iterations = 1)
+        dilate_diff_f1_nf1 = cv2.dilate(f1-nf1, kernel, iterations=1)
+        img = f2 - dilate_nf2 - dilate_diff_f1_nf1
+        if weights != None:
+            img = np.multiple(img, weights)
         deleteradius = 20
         locs = []
-        cut_img = img[deleteradius:(img.shape[0]-deleteradius), deleteradius:(img.shape[1]-deleteradius)].copy()
         for i in range(n):
+            cut_img = img[deleteradius:(img.shape[0]-deleteradius), deleteradius:(img.shape[1]-deleteradius)]
             loc = np.unravel_index(cut_img.argmax(), cut_img.shape)
             v = cut_img[loc[0],loc[1]]
             locs.append([loc[0]+deleteradius, loc[1]+deleteradius, v])
-            cut_img[(loc[0]-deleteradius):(loc[0]+deleteradius),(loc[1]-deleteradius):(loc[1]+deleteradius)]=-10000
+            img[(loc[0]):(loc[0]+2*deleteradius),(loc[1]):(loc[1]+2*deleteradius)]=-10000
         return np.array(locs)
 
 
@@ -38,6 +48,10 @@ class Feature:
             cut.append(img[x1:x2, y1:y2].copy())
         return np.array(cut)
 
+    def decode_square_cut(self, point_index):
+        x = point_index % (self.boxsize*2+1) - (self.boxsize+1)
+        y = point_index / (self.boxsize*2+1) - (self.boxsize+1)
+        return (x, y)
 
     # Get the mean of an image
     def get_mean(self, cut):
@@ -112,6 +126,39 @@ class Feature:
         feature = np.concatenate((feature_cut, feature_edge, feature_ring), axis=1)
         return feature
 
+        
+    # get feature_img and feature_site by feature_index
+    @staticmethod
+    def decode_by_feature_index(index, m=6, boxsize=3):
+        b = boxsize*2+1
+        b2 = b*b
+        if index < m*(b2+2): # feature_cut
+            if index < m*b2: # cut.reshape((self.n, img_size))
+                return int(index/(b2)), ("cut.reshape", (index%(b2)% b - boxsize - 1, int(index%(b2)/b) - boxsize - 1))
+            elif index < m*(b2+1): #self.get_mean(cut)
+                index -= m*b2
+                return index, ("get_mean")
+            else:                                #self.get_std(cut)
+                index -= m*(b2+1)
+                return index, ("get_std")
+        elif index < 2*m*(b2+2):                        #feature_edge
+            index -= m*(b2+2)
+            if index < m*b2:                      #edge.reshape((self.n, img_size))
+                return int(index/(b2)), ("edge.reshape", (index%(b2)% b - boxsize - 1, int(index%(b2)/b) - boxsize - 1))
+            elif index < m*(b2+1):                    #self.edge_mean(cut)
+                index -= m*b2
+                return index, ("edge_mean")
+            else:                                #self.edge_std(cut)
+                index -= m*(b2+1)
+                return index, ("edge_std")
+        else:                                    #feature_ring
+            index -= 2*m*(b2+2)
+            if index < m:
+                return index, ("get_concentric_ring1")
+            else:
+                index -= m
+                return index, ("get_concentric_ring2")
+                
 
     # get the index window of each feature
     def get_index(self):
