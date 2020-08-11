@@ -142,3 +142,42 @@ class Feature:
                     feature_order = order // len_image % len_type
                     print('the image is %s and the type of feature is %s' % (image_type[image_order], feature_type[feature_order]))
                     break
+
+class ShapeFactor:
+    """
+    keep: the coordates of all the pixels of binary mask
+    compute the factors of shape
+    elongation
+    circularity
+    compactness
+    """
+    def __init__(self, binary_mask, keep):
+        self.binary_mask = binary_mask
+        self.keep = keep
+        self.differance = np.maximum(keep) - np.minimum(keep)
+
+    def get_elongation(self):
+        """
+        Elongation: computer through the bounding box of the object
+        width / length
+        """
+        elongation = self.differance[1] / self.differance[0]
+        return elongation
+
+    def get_circularity(self):
+        """
+        worthy to say why the perimeter can be computed in this way
+        """
+        area = self.keep.shape[0] # each data owns one pixel
+        perimeter = (self.differance[1] + self.differance[0]) * 2
+        circularity = 4*np.pi*area / (perimeter**2)
+        return circularity
+
+    def get_compactness(self):
+        area = self.keep.shape[0] # each data owns one pixel
+        compactness = area**2 / 2*np.pi*np.linalg.norm(self.differance)
+        return compactness
+
+    def get_factors(self):
+        factor = [self.get_elongation, self.get_circularity, self.get_compactness]
+        return np.array(factor)
