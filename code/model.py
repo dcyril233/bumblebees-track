@@ -14,23 +14,119 @@ from sklearn.svm import SVC
 from sklearn.neural_network import MLPClassifier
 from sklearn.model_selection import KFold
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.ensemble import GradientBoostingClassifier
+
+
+class TrainValTestModel:
+    # create object storing path of data
+    def __init__(self, X_train, X_val, X_test, y_train, y_val, y_test, model_name):
+        # X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=.2, random_state=0)
+        self.scaler = StandardScaler()
+        self.scaler.fit(X_train)
+        self.X_train = self.scaler.transform(X_train)
+        self.X_val = self.scaler.transform(X_val)
+        self.X_test = self.scaler.transform(X_test)
+        
+        self.y_train = y_train
+        self.y_val = y_val
+        self.y_test = y_test
+
+        self.model_name = model_name
+
+        self.clf = self.get_model(model_name, self.X_train, self.y_train)
+        
+        self.fpr, self.tpr, self.thrshd_roc = self.get_fpr_tpr()
+
+    # bulid model
+    def get_model(self, model_name, X_train, y_train):
+        # logistic regression
+        if model_name == 'LR':
+            clf = LogisticRegression(solver='lbfgs')
+        # random forest
+        elif model_name == 'RF':
+            clf = RandomForestClassifier(max_depth=2, random_state=0)
+        # C-Support Vector Classification
+        elif model_name == 'GB':
+            clf = clf = GradientBoostingClassifier(random_state=0)
+        clf.fit(X_train, y_train)
+        return clf
+
+    def get_fpr_tpr(self):
+        prob_on_val = self.clf.predict_proba(self.X_val)[:,1]
+        fpr, tpr, thrshd_roc = metrics.roc_curve(self.y_val, prob_on_val, pos_label=1)
+        return fpr, tpr, thrshd_roc
+    
+    # see the metrics of model
+    def get_metrics(self, thresh=None):
+        if thresh == None:
+            p = 0.5
+        else:
+            p = thresh
+        pred_proba_df = pd.DataFrame(self.clf.predict_proba(self.X_test)[:,1])
+        y_pred = pred_proba_df.applymap(lambda x: 1 if x>p else 0).to_numpy().reshape((pred_proba_df.shape[0]))
+        print("%s:\n%s\n" % (self.model_name,
+            metrics.classification_report(self.y_test, y_pred)))
+
+    # get the indices of important features
+    def get_important_feature(self):
+        # logistic regression
+        if self.model_name == 'LR':
+            importance = self.clf.coef_[0]
+        # random forest
+        elif self.model_name == 'RF':
+            importance = self.clf.feature_importances_
+        # gradient boosting
+        elif self.model_name == 'GB':
+            importance = self.clf.feature_importances_
+        return importance
+
+    # false-positive rate
+    def test_false_positive(self):
+        # choose threshold
+        pred_proba_df = pd.DataFrame(self.clf.predict_proba(self.X_test)[:,1])
+        threshold_list = [0.05,0.1,0.15,0.2,0.25,0.3,0.35,0.4,0.45,0.5,0.55,0.6,0.65,.7,.75,.8,.85,.9,  .95,.99]
+        for i in threshold_list:
+            print ('\n******** For i = {} ******'.format(i))
+            y_test_pred = pred_proba_df.applymap(lambda x: 1 if x>i else 0).to_numpy().reshape( (pred_proba_df.shape[0]))
+            dataset = {'y_Actual': self.y_test,
+                    'y_Predicted': y_test_pred
+                    }
+            df = pd.DataFrame(dataset, columns=['y_Actual','y_Predicted'])
+            confusion_matrix = pd.crosstab(df['y_Actual'], df['y_Predicted'], rownames= ['Actual'], colnames=['Predicted'])
+            plt.show()
+            sn.heatmap(confusion_matrix, annot=True)
+
+    # get the index of false-positive image
+    def false_positive_index(self, clf, X_test, y_test, threshold):
+        pred_proba_df = pd.DataFrame(clf.predict_proba(X_test)[:,1])
+        y_test_pred = pred_proba_df.applymap(lambda x: 1 if x>threshold else 0).to_numpy().reshape( (pred_proba_df.shape[0]))
+        false_positives = np.logical_and(y_test != y_test_pred, y_test_pred == 1)
+        return np.arange(len(y_test))[false_positives]
+
+    # get the index of false-negtive image
+    def false_negtive_index(self, clf, X_test, y_test, threshold):
+        pred_proba_df = pd.DataFrame(clf.predict_proba(X_test)[:,1])
+        y_test_pred = pred_proba_df.applymap(lambda x: 1 if x>threshold else 0).to_numpy().reshape( (pred_proba_df.shape[0]))
+        false_negtives = np.logical_and(y_test != y_test_pred, y_test_pred == 0)
+        return np.arange(len(y_test))[false_negtives]
+
 
 class LeaveOneOutModel:
     # create object storing path of data
-    def __init__(self, X_train, X_test, Y_train, Y_test, model_name):
+    def __init__(self, X_train, X_test, y_train, y_test, model_name):
         self.scaler = StandardScaler()
         self.scaler.fit(X_train)
         self.X_train = self.scaler.transform(X_train)
         self.X_test = self.scaler.transform(X_test)
         
-        self.Y_train = Y_train
-        self.Y_test = Y_test
+        self.y_train = y_train
+        self.y_test = y_test
 
         self.model_name = model_name
 
-        self.bst_thresh, self._y_prob, self.fpr, self.tpr, self.thrshd_roc = self.leave_one_out_cv_v1(self.X_train, self.Y_train, self.model_name)
+        self.bst_thresh, self._y_prob, self.fpr, self.tpr, self.thrshd_roc = self.leave_one_out_cv_v1(self.X_train, self.y_train, self.model_name)
 
-        self.clf = self.get_model(model_name, self.X_train, self.Y_train)        
+        self.clf = self.get_model(model_name, self.X_train, self.y_train)        
     
     def leave_one_out_cv_v0(self, X, y, model_name):
         # choose threshold
@@ -98,12 +194,10 @@ class LeaveOneOutModel:
         threshold = threshold_list[np.argmax(score)]
         fpr, tpr, thrshd_roc = metrics.roc_curve(y, _y_prob, pos_label=1)
         # fpr, tpr, thrshd_roc = None, None, None
-
-        return threshold, _y_prob, fpr, tpr, thrshd_roc                
+        return threshold, _y_prob, fpr, tpr, thrshd_roc
 
     # bulid model
-    def get_model(self, model_name, X_train, Y_train):
-    
+    def get_model(self, model_name, X_train, y_train):
         # logistic regression
         if model_name == 'LR':
             clf = LogisticRegression(solver='lbfgs')
@@ -111,28 +205,21 @@ class LeaveOneOutModel:
         elif model_name == 'RF':
             clf = RandomForestClassifier(max_depth=2, random_state=0)
         # C-Support Vector Classification
-        elif model_name == 'SCV':
-            clf = SVC(probability=True)
-        # Multi-layer Perceptron
-        elif model_name == 'MLP':
-            clf = MLPClassifier(solver='lbfgs', hidden_layer_sizes=(1000, 500), random_state=0)
-        
-        clf.fit(X_train, Y_train)
-
+        elif model_name == 'GB':
+            clf = clf = GradientBoostingClassifier(random_state=0)
+        clf.fit(X_train, y_train)
         return clf
     
     # see the metrics of model
     def get_metrics(self, thresh=None):
-
         if thresh == None:
             p = self.bst_thresh
         else:
             p = thresh
-
         pred_proba_df = pd.DataFrame(self.clf.predict_proba(self.X_test)[:,1])
         Y_pred = pred_proba_df.applymap(lambda x: 1 if x>p else 0).to_numpy().reshape((pred_proba_df.shape[0]))
         print("%s:\n%s\n" % (self.model_name,
-            metrics.classification_report(self.Y_test, Y_pred)))
+            metrics.classification_report(self.y_test, Y_pred)))
         return 0
 
     # get the indices of important features
@@ -143,7 +230,6 @@ class LeaveOneOutModel:
         # random forest
         elif self.model_name == 'RF':
             importance = self.clf.feature_importances_
-
         return importance
 
     # false-positive rate
@@ -153,9 +239,9 @@ class LeaveOneOutModel:
         threshold_list = [0.05,0.1,0.15,0.2,0.25,0.3,0.35,0.4,0.45,0.5,0.55,0.6,0.65,.7,.75,.8,.85,.9,  .95,.99]
         for i in threshold_list:
             print ('\n******** For i = {} ******'.format(i))
-            Y_test_pred = pred_proba_df.applymap(lambda x: 1 if x>i else 0).to_numpy().reshape( (pred_proba_df.shape[0]))
-            dataset = {'y_Actual':    self.Y_test,
-                    'y_Predicted': Y_test_pred
+            y_test_pred = pred_proba_df.applymap(lambda x: 1 if x>i else 0).to_numpy().reshape( (pred_proba_df.shape[0]))
+            dataset = {'y_Actual':    self.y_test,
+                    'y_Predicted': y_test_pred
                     }
             df = pd.DataFrame(dataset, columns=['y_Actual','y_Predicted'])
             confusion_matrix = pd.crosstab(df['y_Actual'], df['y_Predicted'], rownames= ['Actual'], colnames=['Predicted'])
@@ -163,15 +249,15 @@ class LeaveOneOutModel:
             sn.heatmap(confusion_matrix, annot=True)
 
     # get the index of false-positive image
-    def false_positive_index(self, clf, X_test, Y_test, threshold):
+    def false_positive_index(self, clf, X_test, y_test, threshold):
         pred_proba_df = pd.DataFrame(clf.predict_proba(X_test)[:,1])
-        Y_test_pred = pred_proba_df.applymap(lambda x: 1 if x>threshold else 0).to_numpy().reshape( (pred_proba_df.shape[0]))
-        false_positives = np.logical_and(Y_test != Y_test_pred, Y_test_pred == 1)
-        return np.arange(len(Y_test))[false_positives]
+        y_test_pred = pred_proba_df.applymap(lambda x: 1 if x>threshold else 0).to_numpy().reshape( (pred_proba_df.shape[0]))
+        false_positives = np.logical_and(y_test != y_test_pred, y_test_pred == 1)
+        return np.arange(len(y_test))[false_positives]
 
     # get the index of false-negtive image
-    def false_negtive_index(self, clf, X_test, Y_test, threshold):
+    def false_negtive_index(self, clf, X_test, y_test, threshold):
         pred_proba_df = pd.DataFrame(clf.predict_proba(X_test)[:,1])
-        Y_test_pred = pred_proba_df.applymap(lambda x: 1 if x>threshold else 0).to_numpy().reshape( (pred_proba_df.shape[0]))
-        false_negtives = np.logical_and(Y_test != Y_test_pred, Y_test_pred == 0)
-        return np.arange(len(Y_test))[false_negtives]
+        y_test_pred = pred_proba_df.applymap(lambda x: 1 if x>threshold else 0).to_numpy().reshape( (pred_proba_df.shape[0]))
+        false_negtives = np.logical_and(y_test != y_test_pred, y_test_pred == 0)
+        return np.arange(len(y_test))[false_negtives]

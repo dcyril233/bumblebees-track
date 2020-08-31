@@ -103,8 +103,8 @@ class Visualize:
                 plt.show()
 
 
-    def plot_image_by_feature_importance(self, importance, min_value, max_value, m=6, boxsize=3):
-        image_type = ['no_flash1', 'no_flash2', 'flash', 'flash-no_flash1', 'flash-no_flash2', 'flash-lst_flash']
+    def plot_image_by_feature_importance(self, importance, min_value, max_value, m=4, boxsize=3):
+        image_type = ['no_flash2', 'flash', 'flash-no_flash2', 'flash-lst_flash']
         img_size = (boxsize*2+1)**2
         for i in range(m):
             print('######################################################')

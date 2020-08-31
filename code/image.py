@@ -5,13 +5,15 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import csv
 import cv2
-from feature import Feature
+from feature import Feature, ShapeFactor
 
 class Image:
     """
     store image into a structure
     """
-    def __init__(self, input_data):
+    def __init__(self, name_list, index):
+        fn = name_list[index]
+        input_data = pickle.load(open(fn, 'rb'))
         if type(input_data) is list:
             self.index = input_data[0]
             self.img = input_data[1]
@@ -19,7 +21,7 @@ class Image:
         elif type(input_data) is dict:
             self.index = input_data['index']
             self.img = input_data['img']
-            self.record = input_data['record']
+            self.record = input_data['record'] 
 
 class Data:
     """
@@ -52,33 +54,36 @@ class Data:
         3.the whole group that the brightness of flash image is not high than no-flash image
         """
         # delete data with none
-        origin_data = []
-        del_pair =[]
-        for fn in sorted(glob.glob(self.image_path)):
-            raw_data = pickle.load(open(fn,'rb'))
-            image = Image(raw_data)
-            # delete wrong data
-            if image.img is not None:
-                image.img = image.img.astype(np.float)
-            else:
-                del_pair.append(image.index//self.img_num)
-            origin_data.append(image)
+        data =[]
+        name_list = sorted(glob.glob(self.image_path))
         if del_num != 0:
-            del origin_data[:del_num]
-        del_list = []
-        for i in range(self.img_num):
-            del_list += list(map(lambda x : self.img_num*x+i, del_pair))
-        no_none_data = [image for image in origin_data if image.index not in del_list]
-        # check if flash works
-        del_list = []
-        for i in range(0, len(no_none_data)-1, self.img_num):
-            if np.mean(no_none_data[i+self.img_num-2].img) <= np.mean(no_none_data[i+self.img_num-1].img) + 0.1:
-                for j in range(self.img_num):
-                    del_list.append(i+j)
-            # delete the extra no-flash imgae
-            if self.img_num==3 and i%3==0:
-                del_list.append(i)
-        data = [no_none_data[i] for i in range(len(no_none_data)) if i not in del_list]
+            del name_list[:del_num]
+        # loop all the images
+        for i in range(0, len(name_list), self.img_num):
+            group = []
+            flash_index = i+self.img_num-2
+            no_flash_index = list(set(range(i, i+self.img_num))- set([flash_index]))
+            # check the flash image
+            flash_data = Image(name_list, flash_index)
+            if flash_data.img is None:
+                continue
+            else:
+                flash_bright= np.mean(flash_data.img)
+            # check the no-flash image
+            for index in no_flash_index:
+                no_flash_data = Image(name_list, index)
+                if no_flash_data.img is not None:
+                    no_flash_bright = np.mean(no_flash_data.img)
+                    if flash_bright > no_flash_bright + 0.1:
+                        group = [flash_data, no_flash_data]
+                        break
+            if group == []:
+                continue
+            for image in group:
+                img = image.img.astype(np.float32)
+                cv2.normalize(img, img, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
+                image.img = img.astype(np.int16)
+                data.append(image)
         return data
 
     def get_dilation(self, f1, nf1, f2, nf2, blocksize=15):
@@ -147,102 +152,67 @@ class Data:
             interpd.loc[interpd.shape[0]] = [r, c, v]
         return interpd.values, dilate_locs, diff_locs
 
-
     def label_data(self, csv_path, topn):
+        f_sum = nf_sum = 0
         for i in range(2, len(self.images), 2):
             f1, nf1, f2, nf2 = self.images[i-2].img, self.images[i-1].img, self.images[i].img, self.images[i+1].img
-            dilate_img = self.get_dilation(f1, nf1, f2, nf2)
+            f_sum += f1
+            nf_sum += nf1
+            dilate_img = self.get_dilation(f_sum/i/2, nf_sum/i/2, f2, nf2)
+            # dilate_img = self.get_dilation(f1, nf1, f2, nf2)
             diff_img = f2 - nf2
             locs, dilate_locs, diff_locs = self.get_intersection_rows(dilate_img, diff_img, topn)
             plt.figure(figsize=[60,20])
             plt.subplot(2, 2, 1)
             plt.imshow(f2)
-            # plt.clim([0,10])
+            plt.clim([0,10])
             plt.subplot(2, 2, 2)
             plt.imshow(diff_img)
-            # plt.clim([0,10])
+            plt.clim([0,10])
             # plt.colorbar()
-            for j in range(len(diff_locs)):
+            # for j in range(len(diff_locs)):
+            for j in range(len(dilate_locs)):
                 y, x = diff_locs[j][0], diff_locs[j][1]
                 self.drawreticule(x, y)
             plt.subplot(2, 2, 3)
             plt.imshow(dilate_img)
+            plt.clim([0,10])
             for j in range(len(dilate_locs)):
                 y, x = dilate_locs[j][0], dilate_locs[j][1]
-                print(j, x, y)
                 self.drawreticule(x, y)
             plt.subplot(2, 2, 4)
             plt.imshow(diff_img)
+            plt.clim([0,10])
             plt.title([self.images[i].record['triggertimestring'], self.images[i].index])
             print("the %d th group of images" % i)
             for j in range(len(locs)):
                 y, x = locs[j][0], locs[j][1]
                 print(j, x, y)
                 self.drawreticule(x, y)
-            pos=plt.ginput(n=1, timeout=0)
+            pos = plt.ginput(n=1, timeout=0)
             print(pos)
-            candidate = input('the index of candidate dot is:')
-            if candidate != '':
-                candidate = int(candidate)
+            # candidate = input('the index of candidate dot is:')
+            # if candidate != '':
+            #    candidate = int(candidate)
+            candidate = -1
+            mindistance = 50
+            for j in range(len(locs)):
+                y, x = locs[j][0], locs[j][1]
+                if (pos[0][0] - x)*(pos[0][0] - x) + (pos[0][1] - y)*(pos[0][1] - y) < mindistance:
+                    candidate = j
+                    mindistance = (pos[0][0] - x)*(pos[0][0] - x) + (pos[0][1] - y)*(pos[0][1] - y)
+            print('candidate = %d, distance = %d ' % (candidate, mindistance))
+            if candidate != -1:
                 with open(csv_path, mode='a') as file:
                     writer = csv.writer(file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
                     name = 'photo_object_' + self.images[i].record['triggertimestring'].replace(':', '_')
                     index = self.images[i].index
                     name += '_' + "{:04n}".format(index) + '.np'
                     writer.writerow([i, name, locs[candidate][1], locs[candidate][0]])
+            plt.close()
 
     def import_label(self, label_path):
         self.label = pd.read_csv(label_path, names=['index','filename', 'x', 'y'])
-
-    def generate_candidates_by_feature(self, topn):
-        belonging = []
-        x = []
-        y = []
-        features = []
-        labels = []
-        for i in range(2, len(self.images), 2):
-            f1, nf1, f2, nf2 = self.images[i-2].img, self.images[i-1].img, self.images[i].img, self.images[i+1].img
-            dilate_img = self.get_dilation(f1, nf1, f2, nf2)
-            diff_img = f2 - nf2
-            locs, dilate_locs, diff_locs = self.get_intersection_rows(dilate_img, diff_img, topn)
-            feature = Feature(locs, f1, nf1, f2, nf2, n=topn).get_feature()
-            index = self.images[i].index
-            name = 'photo_object_' + self.images[i].record['triggertimestring'].replace(':', '_')
-            name += '_' + "{:04n}".format(index) + '.np'
-            belonging += [name]*topn
-            x += locs[:, 1].tolist()
-            y += locs[:, 0].tolist()
-            for f in feature:
-                features.append(f)
-            # store the correct position of true positive data
-            dfs = self.label[self.label['filename']==name]
-            if len(dfs)>0:
-                correctx = dfs['x'].tolist()[0]
-                correcty = dfs['y'].tolist()[0]
-            else:
-                correctx = None
-                correcty = None
-            for i in range(len(locs)):
-                loc = locs[i]
-                if loc[1]==correctx and loc[0]==correcty:
-                    labels.append(1)
-                else:
-                    labels.append(0)
-        candidates = {'index': np.arange(len(belonging)), 'Name': belonging, 'x':x, 'y':y, 'features':np.array(features), 'labels':np.array(labels)}
-        return candidates
-
-    def mark_test_result(self, candidates, path, index_list):
-        for index in index_list:
-            fn = path + candidates['Name'][index]
-            x = candidates['x'][index]
-            y = candidates['y'][index]
-            data = pickle.load(open(fn,'rb'))
-            plt.figure(figsize=[25,20])
-            img = data['img']
-            plt.imshow(img)
-            plt.clim([0,10])
-            plt.colorbar()
-            self.drawreticule(x, y)
 
     def get_neighbour_imple(self, patch, point, ban, keep):
         patch_size = len(patch)
@@ -299,7 +269,7 @@ class Data:
             binary_mask[row, col] = 1
         return binary_mask, np.array(keep)
 
-    def find_threshold(self, topn, boxsize):
+    def find_threshold(self, boxsize):
         for i in range(self.label.shape[0]):
             series = self.label.iloc[i]
             index = series['index']
@@ -308,7 +278,7 @@ class Data:
             print('the mean value of this patch', np.mean(diff_img))
             print('the maxium value of this patch', np.max(diff_img))
             pixel_values = diff_img.flatten()
-            n, bins, patches = plt.hist(pixel_values, 40, facecolor='blue', alpha=0.5)
+            n, bins, patches = plt.hist(pixel_values, 40, facecolor='blue', alpha=0.5, log=True)
             print(n, bins, patches)
             plt.show()
             threshold = int(input('the suitable threshold:'))
@@ -328,3 +298,70 @@ class Data:
             plt.subplot(1, 2, 2)
             plt.imshow(binary_mask)
             plt.show()
+
+    def get_factors(self, locs, diff_img, boxsize, threshold):
+        factor = []
+        for loc in locs:
+            binary_img = np.where(diff_img > threshold, 1, 0)
+            r, c = loc[0], loc[1]
+            r1, r2 = int(r-boxsize), int(r+boxsize)+1
+            c1, c2 = int(c-boxsize), int(c+boxsize)+1
+            binary_patch = binary_img[r1:r2, c1:c2]
+            point = [boxsize, boxsize]
+            binary_mask, keep = self.get_neighbour(binary_patch, point)
+            f = ShapeFactor(binary_mask, keep).get_factors()
+            factor.append(f)
+        return factor
+            
+    def generate_candidates(self, topn, boxsize, threshold):
+        belonging = []
+        x = []
+        y = []
+        features = []
+        factors = []
+        labels = []
+        for i in range(2, len(self.images), 2):
+            f1, nf1, f2, nf2 = self.images[i-2].img, self.images[i-1].img, self.images[i].img, self.images[i+1].img
+            dilate_img = self.get_dilation(f1, nf1, f2, nf2)
+            diff_img = f2 - nf2
+            locs, dilate_locs, diff_locs = self.get_intersection_rows(dilate_img, diff_img, topn)
+            feature = Feature(locs, f1, nf1, f2, nf2).get_feature()
+            for f in feature:
+                features.append(f)
+            factor = self.get_factors(locs, diff_img, boxsize, threshold)
+            factors += factor
+            index = self.images[i].index
+            name = 'photo_object_' + self.images[i].record['triggertimestring'].replace(':', '_')
+            name += '_' + "{:04n}".format(index) + '.np'
+            belonging += [name]*len(locs)
+            x += locs[:, 1].tolist()
+            y += locs[:, 0].tolist()
+            # store the correct position of true positive data
+            dfs = self.label[self.label['filename']==name]
+            if len(dfs)>0:
+                correctx = dfs['x'].tolist()[0]
+                correcty = dfs['y'].tolist()[0]
+            else:
+                correctx = None
+                correcty = None
+            for i in range(len(locs)):
+                loc = locs[i]
+                if loc[1]==correctx and loc[0]==correcty:
+                    labels.append(1)
+                else:
+                    labels.append(0)
+        candidates = {'index': np.arange(len(belonging)), 'Name': belonging, 'x':x, 'y':y, 'features':np.array(features), 'factors':np.array(factors), 'labels':np.array(labels)}
+        return candidates
+           
+    def mark_test_result(self, candidates, path, index_list):
+        for index in index_list:
+            fn = path + candidates['Name'][index]
+            x = candidates['x'][index]
+            y = candidates['y'][index]
+            data = pickle.load(open(fn,'rb'))
+            plt.figure(figsize=[25,20])
+            img = data['img']
+            plt.imshow(img)
+            plt.clim([0,10])
+            plt.colorbar()
+            self.drawreticule(x, y)

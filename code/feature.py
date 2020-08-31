@@ -7,11 +7,11 @@ class Feature:
     """
     create new Feature object storing 4 images
     """
-    def __init__(self, locs, lst_flash, lst_no_flash2, flash, no_flash2, n=15, boxsize=3, r=3):
-        self.n = n
+    def __init__(self, locs, lst_flash, lst_no_flash2, flash, no_flash2, boxsize=3, r=3):
         self.boxsize = boxsize
         self.r = r
         self.locs = locs
+        self.n = len(locs)
         self.comb_img = [no_flash2, flash, flash-no_flash2, flash-lst_flash]
 
     # get the boxsize by boxsize cut image of top n brightest dots 
@@ -69,13 +69,6 @@ class Feature:
             mean.append(np.mean(laplacian))
             std.append(np.std(laplacian))
         return np.array(laplacians), np.array(mean), np.array(std)
-
-    def sift(self, cut):
-        keyfeatures = []
-        for img in cut:
-            sift = cv.SIFT_create()
-            kp, des = sift.detectAndCompute(img, None)
-            keyfeatures.append(des.reshape())
 
     # get the feature
     def get_feature(self):
@@ -154,7 +147,10 @@ class ShapeFactor:
     def __init__(self, binary_mask, keep):
         self.binary_mask = binary_mask
         self.keep = keep
-        self.differance = np.maximum(keep) - np.minimum(keep)
+        if keep.shape[0] == 1:
+            self.differance = np.array([1, 1])
+        else:
+            self.differance = np.amax(keep, axis=0) + np.ones(2) - np.amin(keep, axis=0)
 
     def get_elongation(self):
         """
@@ -179,5 +175,5 @@ class ShapeFactor:
         return compactness
 
     def get_factors(self):
-        factor = [self.get_elongation, self.get_circularity, self.get_compactness]
+        factor = [self.get_elongation(), self.get_circularity(), self.get_compactness()]
         return np.array(factor)
