@@ -32,19 +32,23 @@ class Data:
         1 means (flash, no flash) is a group
     del_num: the number of invalid images in the begining
     """
-    def __init__(self, image_path, label_path=None, version=1, del_num=0, topn=15):
-        self.image_path = image_path
-        if version == 0:
-            self.img_num = 3
-        elif version == 1:
-            self.img_num = 2
-        self.images = self.import_images(del_num)
-        if label_path == None:
-            label_path = input("input the path you want to store labels:")
-            self.label_data(label_path, topn)
-            self.label = None
-        else:
-            self.import_label(label_path)
+    def __init__(self, image_path=None, label_path=None, version=1, del_num=0, topn=15, relabel=False, test=False):
+        if test == False:
+            self.image_path = image_path
+            self.relabel = relabel
+            if version == 0:
+                self.img_num = 3
+            elif version == 1:
+                self.img_num = 2
+            self.images = self.import_images(del_num)
+            if label_path == None:
+                label_path = input("input the path you want to store labels:")
+                self.label_data(label_path, topn)
+                self.label = None
+            else:
+                self.import_label(label_path)
+                if relabel == True:
+                    self.label_data(label_path, topn)
 
     def import_images(self, del_num=0):
         """
@@ -80,20 +84,23 @@ class Data:
             if group == []:
                 continue
             for image in group:
-                img = image.img.astype(np.float32)
-                cv2.normalize(img, img, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
-                image.img = img.astype(np.int16)
+                # normalize all the img
+                # img = image.img.astype(np.float32)
+                # cv2.normalize(img, img, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
+                # image.img = img.astype(np.int16)
+                image.img = image.img.astype(np.int16)
                 data.append(image)
         return data
 
     def get_dilation(self, f1, nf1, f2, nf2, blocksize=15):
+        copy_f1, copy_nf1, copy_f2, copy_nf2 = f1.copy(), nf1.copy(), f2.copy(), nf2.copy()
         kernel = np.ones((blocksize, blocksize), np.uint8)
-        dilate_nf2 = cv2.dilate(nf2, kernel, iterations = 1)
-        dilate_diff_f1_nf1 = cv2.dilate(f1-nf1, kernel, iterations=1)
-        img = f2 - dilate_nf2 - dilate_diff_f1_nf1
+        dilate_nf2 = cv2.dilate(copy_nf2, kernel, iterations = 1)
+        dilate_diff_f1_nf1 = cv2.dilate(copy_f1-copy_nf1, kernel, iterations=1)
+        img = copy_f2 - dilate_nf2 - dilate_diff_f1_nf1
         return img
 
-    def getmaxlocs(self, img, n=10, deleteradius=20):
+    def getmaxlocs(self, img, n=10, deleteradius=40):
         copy_img = img.copy()
         locs = [] # store the coodinates
         for i in range(n):
@@ -119,19 +126,6 @@ class Data:
             plt.vlines(x,y-70,y-10,c,alpha=alpha)
             plt.vlines(x,y+10,y+70,c,alpha=alpha)
 
-    def lowresmaximg(self, img, blocksize=10):
-        """
-        Downsample image, using maximum from each block
-        #from https://stackoverflow.com/questions/18645013/windowed-maximum-in-numpy
-        """
-        k = int(img.shape[0] / blocksize)
-        l = int(img.shape[1] / blocksize)
-        if blocksize==1:
-            maxes = img
-        else:
-            maxes = img[:k*blocksize,:l*blocksize].reshape(k,blocksize,l,blocksize).max(axis=(-1,-3))
-        return maxes
-
     def get_intersection_rows(self, dilate_img, diff_img, topn):
         dilate_locs = self.getmaxlocs(dilate_img, n=topn)
         diff_locs = self.getmaxlocs(diff_img, n=topn)
@@ -153,36 +147,37 @@ class Data:
         return interpd.values, dilate_locs, diff_locs
 
     def label_data(self, csv_path, topn):
-        f_sum = nf_sum = 0
-        for i in range(2, len(self.images), 2):
-            f1, nf1, f2, nf2 = self.images[i-2].img, self.images[i-1].img, self.images[i].img, self.images[i+1].img
-            f_sum += f1
-            nf_sum += nf1
-            dilate_img = self.get_dilation(f_sum/i/2, nf_sum/i/2, f2, nf2)
-            # dilate_img = self.get_dilation(f1, nf1, f2, nf2)
+        for i in range(2, len(self.images)-2, 2):
+            f1, nf1, f2, nf2, f3, nf3 = self.images[i-2].img, self.images[i-1].img, self.images[i].img, self.images[i+1].img, self.images[i+2].img, self.images[i+3].img
+            if self.relabel == True and self.images[i].index in self.label['index'].values:
+                continue
+            past_dilate_img = self.get_dilation(f1, nf1, f2, nf2)
+            future_dilate_img = self.get_dilation(f3, nf3, f2, nf2)
+            locs, past_dilate_locs, future_dilate_locs = self.get_intersection_rows(past_dilate_img, future_dilate_img, topn)
             diff_img = f2 - nf2
-            locs, dilate_locs, diff_locs = self.get_intersection_rows(dilate_img, diff_img, topn)
             plt.figure(figsize=[60,20])
             plt.subplot(2, 2, 1)
             plt.imshow(f2)
-            plt.clim([0,10])
+            plt.title('flash image')
+            # plt.clim([0,10])
             plt.subplot(2, 2, 2)
-            plt.imshow(diff_img)
-            plt.clim([0,10])
-            # plt.colorbar()
-            # for j in range(len(diff_locs)):
-            for j in range(len(dilate_locs)):
-                y, x = diff_locs[j][0], diff_locs[j][1]
+            plt.imshow(past_dilate_img, vmin=0, vmax=255)
+            plt.title('the seond difference between the current and the previous')
+            # plt.clim([0,10])
+            for j in range(len(past_dilate_locs)):
+                y, x = past_dilate_locs[j][0], past_dilate_locs[j][1]
                 self.drawreticule(x, y)
+            # plt.colorbar()
             plt.subplot(2, 2, 3)
-            plt.imshow(dilate_img)
-            plt.clim([0,10])
-            for j in range(len(dilate_locs)):
-                y, x = dilate_locs[j][0], dilate_locs[j][1]
+            plt.imshow(future_dilate_img, vmin=0, vmax=255)
+            plt.title('the seond difference between the current and the next')
+            # plt.clim([0,10])
+            for j in range(len(future_dilate_locs)):
+                y, x = future_dilate_locs[j][0], future_dilate_locs[j][1]
                 self.drawreticule(x, y)
             plt.subplot(2, 2, 4)
-            plt.imshow(diff_img)
-            plt.clim([0,10])
+            plt.imshow(f2)
+            # plt.clim([0,10])
             plt.title([self.images[i].record['triggertimestring'], self.images[i].index])
             print("the %d th group of images" % i)
             for j in range(len(locs)):
@@ -208,7 +203,7 @@ class Data:
                     name = 'photo_object_' + self.images[i].record['triggertimestring'].replace(':', '_')
                     index = self.images[i].index
                     name += '_' + "{:04n}".format(index) + '.np'
-                    writer.writerow([i, name, locs[candidate][1], locs[candidate][0]])
+                    writer.writerow([index, name, locs[candidate][1], locs[candidate][0]])
             plt.close()
 
     def import_label(self, label_path):
@@ -269,35 +264,16 @@ class Data:
             binary_mask[row, col] = 1
         return binary_mask, np.array(keep)
 
-    def find_threshold(self, boxsize):
-        for i in range(self.label.shape[0]):
-            series = self.label.iloc[i]
-            index = series['index']
-            f2, nf2 = self.images[index].img, self.images[index+1].img
-            diff_img = f2 - nf2
-            print('the mean value of this patch', np.mean(diff_img))
-            print('the maxium value of this patch', np.max(diff_img))
-            pixel_values = diff_img.flatten()
-            n, bins, patches = plt.hist(pixel_values, 40, facecolor='blue', alpha=0.5, log=True)
-            print(n, bins, patches)
+    def get_mean_diff(self):
+        diff_img = np.zeros((1536, 2048))
+        for i in range(0, len(self.images), 2):
+            f2, nf2 = self.images[i].img, self.images[i+1].img
+            diff = f2 - nf2
+            diff_img += diff
+            pixel_values = diff.flatten()
+            plt.hist(pixel_values, 40, facecolor='blue', alpha=0.5, log=True)
             plt.show()
-            threshold = int(input('the suitable threshold:'))
-            binary_img = np.where(diff_img > threshold, 1, 0)
-            r, c = series['y'], series['x']
-            r1, r2 = int(r-boxsize), int(r+boxsize)+1
-            c1, c2 = int(c-boxsize), int(c+boxsize)+1
-            plt.figure()
-            patch = diff_img[r1:r2, c1:c2]
-            print(patch)
-            plt.subplot(1, 2, 1)
-            plt.imshow(patch)
-            binary_patch = binary_img[r1:r2, c1:c2]
-            point = [boxsize, boxsize]
-            binary_mask, keep = self.get_neighbour(binary_patch, point)
-            print(keep)
-            plt.subplot(1, 2, 2)
-            plt.imshow(binary_mask)
-            plt.show()
+        return diff_img/len(self.images)
 
     def get_factors(self, locs, diff_img, boxsize, threshold):
         factor = []
@@ -320,12 +296,13 @@ class Data:
         features = []
         factors = []
         labels = []
-        for i in range(2, len(self.images), 2):
-            f1, nf1, f2, nf2 = self.images[i-2].img, self.images[i-1].img, self.images[i].img, self.images[i+1].img
-            dilate_img = self.get_dilation(f1, nf1, f2, nf2)
+        for i in range(2, len(self.images)-2, 2):
+            f1, nf1, f2, nf2, f3, nf3 = self.images[i-2].img, self.images[i-1].img, self.images[i].img, self.images[i+1].img, self.images[i+2].img, self.images[i+3].img
+            past_dilate_img = self.get_dilation(f1, nf1, f2, nf2)
+            future_dilate_img = self.get_dilation(f3, nf3, f2, nf2)
+            locs, past_dilate_locs, future_dilate_locs = self.get_intersection_rows(past_dilate_img, future_dilate_img, topn)
             diff_img = f2 - nf2
-            locs, dilate_locs, diff_locs = self.get_intersection_rows(dilate_img, diff_img, topn)
-            feature = Feature(locs, f1, nf1, f2, nf2).get_feature()
+            feature = Feature(locs, f1, nf1, f2, nf2, f3, nf3, past_dilate_img, future_dilate_img).get_feature()
             for f in feature:
                 features.append(f)
             factor = self.get_factors(locs, diff_img, boxsize, threshold)

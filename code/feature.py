@@ -7,12 +7,13 @@ class Feature:
     """
     create new Feature object storing 4 images
     """
-    def __init__(self, locs, lst_flash, lst_no_flash2, flash, no_flash2, boxsize=3, r=3):
+    def __init__(self, locs, f1, nf1, f2, nf2, f3, nf3, past_dilate_img, future_dilate_img, boxsize=3, r=3):
         self.boxsize = boxsize
         self.r = r
         self.locs = locs
         self.n = len(locs)
-        self.comb_img = [no_flash2, flash, flash-no_flash2, flash-lst_flash]
+        # self.comb_img = [f2, nf2, f2-nf2, f2-f1, f2-f3, past_dilate_img, future_dilate_img]
+        self.comb_img = [past_dilate_img, future_dilate_img]
 
     # get the boxsize by boxsize cut image of top n brightest dots 
     def get_square_cut(self, img, boxsize):
@@ -138,7 +139,7 @@ class Feature:
 
 class ShapeFactor:
     """
-    keep: the coordates of all the pixels of binary mask
+    keep: the coordinates of all the pixels of binary mask
     compute the factors of shape
     elongation
     circularity
@@ -155,17 +156,14 @@ class ShapeFactor:
     def get_elongation(self):
         """
         Elongation: computer through the bounding box of the object
-        width / length
+        sqrt(width / length)
         """
-        elongation = self.differance[1] / self.differance[0]
+        elongation = np.sqrt(np.min(self.differance) / np.max(self.differance))
         return elongation
 
     def get_circularity(self):
-        """
-        worthy to say why the perimeter can be computed in this way
-        """
         area = self.keep.shape[0] # each data owns one pixel
-        perimeter = (self.differance[1] + self.differance[0]) * 2
+        perimeter = self.get_perimeter()
         circularity = 4*np.pi*area / (perimeter**2)
         return circularity
 
@@ -177,3 +175,19 @@ class ShapeFactor:
     def get_factors(self):
         factor = [self.get_elongation(), self.get_circularity(), self.get_compactness()]
         return np.array(factor)
+
+    def get_perimeter(self):
+        perimeter = 0
+        for coordinate in self.keep:
+            i, j = coordinate[0], coordinate[1]
+            count = 0
+            if i > 0 and self.binary_mask[i-1, j] == 1:
+                count += 1
+            if i < self.binary_mask.shape[0]-1 and self.binary_mask[i+1, j] == 1:
+                count += 1
+            if j > 0 and self.binary_mask[i, j-1] == 1:
+                count += 1
+            if j < self.binary_mask.shape[1]-1 and self.binary_mask[i, j+1] == 1:
+                count += 1
+            perimeter += 4 - count
+        return perimeter

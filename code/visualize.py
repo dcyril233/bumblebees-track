@@ -12,7 +12,6 @@ class Visualize:
     def __init__(self):
         pass
 
-
     # plot roc curve
     def plot_roc_curve(self, fpr, tpr):
         roc_auc = metrics.auc(fpr, tpr)
@@ -26,9 +25,6 @@ class Visualize:
         plt.xlabel('False Positive Rate')
         plt.show()
 
-        return 0
-
-
     # plot confusion matrix
     def plot_confusion(self, clf, X_test, Y_test, threshold):
         pred_proba_df = pd.DataFrame(clf.predict_proba(X_test)[:,1])
@@ -39,8 +35,8 @@ class Visualize:
         df = pd.DataFrame(data, columns=['y_Actual','y_Predicted'])
         confusion_matrix = pd.crosstab(df['y_Actual'], df['y_Predicted'], rownames= ['Actual'], colnames=['Predicted'])
         plt.show()
-        sn.heatmap(confusion_matrix, annot=True, fmt="d")
-
+        figure = sn.heatmap(confusion_matrix, annot=True, fmt="d")
+        return figure
 
     # plot n most important features 
     def plot_feature(self, importance, index, n):

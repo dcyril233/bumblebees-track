@@ -15,11 +15,12 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.model_selection import KFold
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.model_selection import RandomizedSearchCV
 
 
 class TrainValTestModel:
     # create object storing path of data
-    def __init__(self, X_train, X_val, X_test, y_train, y_val, y_test, model_name):
+    def __init__(self, X_train, X_val, X_test, y_train, y_val, y_test, model_name, cross_val=False):
         # X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=.2, random_state=0)
         self.scaler = StandardScaler()
         self.scaler.fit(X_train)
@@ -33,7 +34,18 @@ class TrainValTestModel:
 
         self.model_name = model_name
 
-        self.clf = self.get_model(model_name, self.X_train, self.y_train)
+        if cross_val == True:
+            best_params = self.tuning_hyperparameter()
+            self.best_params = best_params
+            self.clf = RandomForestClassifier(bootstrap=best_params['bootstrap'],
+                                              max_depth=best_params['max_depth'],
+                                              max_features=best_params['max_features'],
+                                              min_samples_leaf=best_params['min_samples_leaf'],
+                                              min_samples_split=best_params['min_samples_split'],
+                                              n_estimators=best_params['n_estimators'])
+            self.clf.fit(self.X_train, self.y_train)
+        else:
+            self.clf = self.get_model(model_name, self.X_train, self.y_train)
         
         self.fpr, self.tpr, self.thrshd_roc = self.get_fpr_tpr()
 
@@ -50,6 +62,27 @@ class TrainValTestModel:
             clf = clf = GradientBoostingClassifier(random_state=0)
         clf.fit(X_train, y_train)
         return clf
+
+    def tuning_hyperparameter(self):
+        n_estimators = [int(x) for x in np.linspace(start = 200, stop = 2000, num = 10)]
+        max_features = ['auto', 'sqrt']
+        max_depth = [int(x) for x in np.linspace(10, 110, num = 11)]
+        max_depth.append(None)
+        min_samples_split = [2, 5, 10]
+        min_samples_leaf = [1, 2, 4]
+        bootstrap = [True, False]
+        # Create the random grid
+        random_grid = {'n_estimators': n_estimators,
+                       'max_features': max_features,
+                       'max_depth': max_depth,
+                       'min_samples_split': min_samples_split,
+                       'min_samples_leaf': min_samples_leaf,
+                       'bootstrap': bootstrap}
+        rf = RandomForestClassifier()
+        rf_random = RandomizedSearchCV(estimator=rf, param_distributions=random_grid, n_iter=100, cv=4, verbose=2, random_state=42, n_jobs=-1)
+        # Fit the random search model
+        rf_random.fit(self.X_train, self.y_train)
+        return rf_random.best_params_
 
     def get_fpr_tpr(self):
         prob_on_val = self.clf.predict_proba(self.X_val)[:,1]
