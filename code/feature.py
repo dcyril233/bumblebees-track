@@ -7,13 +7,14 @@ class Feature:
     """
     create new Feature object storing 4 images
     """
-    def __init__(self, locs, f1, nf1, f2, nf2, f3, nf3, past_dilate_img, future_dilate_img, boxsize=3, r=3):
-        self.boxsize = boxsize
-        self.r = r
-        self.locs = locs
-        self.n = len(locs)
-        # self.comb_img = [f2, nf2, f2-nf2, f2-f1, f2-f3, past_dilate_img, future_dilate_img]
-        self.comb_img = [past_dilate_img, future_dilate_img]
+    def __init__(self, locs=None, f1=None, nf1=None, f2=None, nf2=None, f3=None, nf3=None, past_dilate_img=None, future_dilate_img=None, boxsize=3, r=3, test=False):
+        if test == False:
+            self.boxsize = boxsize
+            self.r = r
+            self.locs = locs
+            self.n = len(locs)
+            # self.comb_img = [f2, nf2, f2-nf2, f2-f1, f2-f3, past_dilate_img, future_dilate_img]
+            self.comb_img = [past_dilate_img, future_dilate_img]
 
     # get the boxsize by boxsize cut image of top n brightest dots 
     def get_square_cut(self, img, boxsize):
@@ -41,18 +42,17 @@ class Feature:
         return np.array(std)
 
     # get the mean and std of concentric ring of top n brightest dots
-    def get_concentric_ring(self, img, r):
+    def get_concentric_ring(self, locs, img, r):
         boxsize = int(r)
-        cut = []
-        for brightest in self.locs:
+        for brightest in locs:
             x1 = int(brightest[0]-boxsize)
             x2 = int(brightest[0]+boxsize)+1
             y1 = int(brightest[1]-boxsize)
             y2 = int(brightest[1]+boxsize)+1
             circle = img[x1:x2, y1:y2].copy()
             store_lst = []
-            for i in range(1, circle.shape[0]+1):
-                for j in range(1, circle.shape[1]+1):
+            for i in range(circle.shape[0]):
+                for j in range(circle.shape[1]):
                     if (i-r)**2 + (j-r)**2 <= r**2:
                         store_lst.append(circle[i,j])
             store_lst = np.array(store_lst)
@@ -65,7 +65,7 @@ class Feature:
         std = []
         for img in cut:
             # convolute with proper kernels
-            laplacian = laplace(img)
+            laplacian = cv2.Laplacian(img, cv2.CV_64F)
             laplacians.append(laplacian)
             mean.append(np.mean(laplacian))
             std.append(np.std(laplacian))
@@ -90,7 +90,7 @@ class Feature:
             feature_edge[:, img_size*m+i] = edge_mean
             feature_edge[:, img_size*m+m+i] = edge_std
 
-            feature_ring[:, i], feature_ring[:, m+i] = self.get_concentric_ring(img, r=self.r)
+            feature_ring[:, i], feature_ring[:, m+i] = self.get_concentric_ring(self.locs, img, r=self.r)
 
         feature = np.concatenate((feature_cut, feature_edge, feature_ring), axis=1)
         return feature
@@ -145,49 +145,54 @@ class ShapeFactor:
     circularity
     compactness
     """
-    def __init__(self, binary_mask, keep):
-        self.binary_mask = binary_mask
-        self.keep = keep
-        if keep.shape[0] == 1:
-            self.differance = np.array([1, 1])
-        else:
-            self.differance = np.amax(keep, axis=0) + np.ones(2) - np.amin(keep, axis=0)
+    def __init__(self, binary_mask=None, keep=None, test=False):
+        if test == False:
+            self.binary_mask = binary_mask
+            self.keep = keep
+            if keep.shape[0] == 1:
+                self.differance = np.array([1, 1])
+            else:
+                self.differance = np.amax(keep, axis=0) + np.ones(2) - np.amin(keep, axis=0)
 
-    def get_elongation(self):
+    def get_elongation(self, differance):
         """
         Elongation: computer through the bounding box of the object
         sqrt(width / length)
         """
-        elongation = np.sqrt(np.min(self.differance) / np.max(self.differance))
+        elongation = np.sqrt(np.min(differance) / np.max(differance))
         return elongation
 
-    def get_circularity(self):
-        area = self.keep.shape[0] # each data owns one pixel
-        perimeter = self.get_perimeter()
+    def get_circularity(self, keep, binary_mask):
+        area = self.get_area(keep)
+        perimeter = self.get_perimeter(keep, binary_mask)
         circularity = 4*np.pi*area / (perimeter**2)
         return circularity
 
-    def get_compactness(self):
-        area = self.keep.shape[0] # each data owns one pixel
-        compactness = area**2 / 2*np.pi*np.linalg.norm(self.differance)
+    def get_compactness(self, keep, differance):
+        area = self.get_area(keep)
+        compactness = area**2 / 2*np.pi*np.linalg.norm(differance)
         return compactness
 
     def get_factors(self):
-        factor = [self.get_elongation(), self.get_circularity(), self.get_compactness()]
+        factor = [self.get_elongation(self.differance), self.get_circularity(self.keep, self.binary_mask), self.get_compactness(self.keep, self.differance)]
         return np.array(factor)
 
-    def get_perimeter(self):
+    def get_area(self, keep):
+        area = keep.shape[0] # each data owns one pixel
+        return area
+
+    def get_perimeter(self, keep, binary_mask):
         perimeter = 0
-        for coordinate in self.keep:
+        for coordinate in keep:
             i, j = coordinate[0], coordinate[1]
             count = 0
-            if i > 0 and self.binary_mask[i-1, j] == 1:
+            if i > 0 and binary_mask[i-1, j] == 1:
                 count += 1
-            if i < self.binary_mask.shape[0]-1 and self.binary_mask[i+1, j] == 1:
+            if i < binary_mask.shape[0]-1 and binary_mask[i+1, j] == 1:
                 count += 1
-            if j > 0 and self.binary_mask[i, j-1] == 1:
+            if j > 0 and binary_mask[i, j-1] == 1:
                 count += 1
-            if j < self.binary_mask.shape[1]-1 and self.binary_mask[i, j+1] == 1:
+            if j < binary_mask.shape[1]-1 and binary_mask[i, j+1] == 1:
                 count += 1
             perimeter += 4 - count
         return perimeter

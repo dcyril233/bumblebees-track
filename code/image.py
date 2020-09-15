@@ -32,7 +32,7 @@ class Data:
         1 means (flash, no flash) is a group
     del_num: the number of invalid images in the begining
     """
-    def __init__(self, image_path=None, label_path=None, version=1, del_num=0, topn=15, relabel=False, test=False):
+    def __init__(self, image_path=None, label_path=None, version=1, del_num=0, topn=15, relabel=False, test=False, ignore_area=None):
         if test == False:
             self.image_path = image_path
             self.relabel = relabel
@@ -40,7 +40,7 @@ class Data:
                 self.img_num = 3
             elif version == 1:
                 self.img_num = 2
-            self.images = self.import_images(del_num)
+            self.images = self.import_images(del_num, ignore_area)
             if label_path == None:
                 label_path = input("input the path you want to store labels:")
                 self.label_data(label_path, topn)
@@ -50,7 +50,7 @@ class Data:
                 if relabel == True:
                     self.label_data(label_path, topn)
 
-    def import_images(self, del_num=0):
+    def import_images(self, del_num=0, ignore_area=None):
         """
         import all the images and delete those images that satisfy the two conditions below:
         1.the extra no-flash image from a group (each group should include two images: flash and no-flash)
@@ -89,13 +89,16 @@ class Data:
                 # cv2.normalize(img, img, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
                 # image.img = img.astype(np.int16)
                 image.img = image.img.astype(np.int16)
+                if ignore_area is not None:
+                    # cut out the area including specially false dots in data on April 13
+                    image.img[:ignore_area[0], :ignore_area[1]] = -10000
                 data.append(image)
         return data
 
     def get_dilation(self, f1, nf1, f2, nf2, blocksize=15):
         copy_f1, copy_nf1, copy_f2, copy_nf2 = f1.copy(), nf1.copy(), f2.copy(), nf2.copy()
         kernel = np.ones((blocksize, blocksize), np.uint8)
-        dilate_nf2 = cv2.dilate(copy_nf2, kernel, iterations = 1)
+        dilate_nf2 = cv2.dilate(copy_nf2, kernel, iterations=1)
         dilate_diff_f1_nf1 = cv2.dilate(copy_f1-copy_nf1, kernel, iterations=1)
         img = copy_f2 - dilate_nf2 - dilate_diff_f1_nf1
         return img
@@ -289,7 +292,7 @@ class Data:
             factor.append(f)
         return factor
             
-    def generate_candidates(self, topn, boxsize, threshold):
+    def generate_candidates(self, topn, boxsize, threshold, blocksize=41):
         belonging = []
         x = []
         y = []
@@ -298,8 +301,8 @@ class Data:
         labels = []
         for i in range(2, len(self.images)-2, 2):
             f1, nf1, f2, nf2, f3, nf3 = self.images[i-2].img, self.images[i-1].img, self.images[i].img, self.images[i+1].img, self.images[i+2].img, self.images[i+3].img
-            past_dilate_img = self.get_dilation(f1, nf1, f2, nf2)
-            future_dilate_img = self.get_dilation(f3, nf3, f2, nf2)
+            past_dilate_img = self.get_dilation(f1, nf1, f2, nf2, blocksize)
+            future_dilate_img = self.get_dilation(f3, nf3, f2, nf2, blocksize)
             locs, past_dilate_locs, future_dilate_locs = self.get_intersection_rows(past_dilate_img, future_dilate_img, topn)
             diff_img = f2 - nf2
             feature = Feature(locs, f1, nf1, f2, nf2, f3, nf3, past_dilate_img, future_dilate_img).get_feature()

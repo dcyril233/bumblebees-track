@@ -16,6 +16,7 @@ from sklearn.model_selection import KFold
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.model_selection import RandomizedSearchCV
+from sklearn.metrics import make_scorer
 
 
 class TrainValTestModel:
@@ -77,12 +78,20 @@ class TrainValTestModel:
                        'max_depth': max_depth,
                        'min_samples_split': min_samples_split,
                        'min_samples_leaf': min_samples_leaf,
-                       'bootstrap': bootstrap}
+                       'bootstrap': bootstrap}            
+        def my_scorer(clf, X, y_true):
+            y_pred_proba = clf.predict_proba(X)
+            y_pred = np.where(y_pred_proba > 0.5, 1, 0)
+            error  = np.sum(np.logical_and(y_pred != y_true, y_pred == 1)) / np.count_nonzero(y_true == 0)
+            return error
+        def fp(y_true, y_pred): return confusion_matrix(y_true, y_pred)[0, 1]
+        score = make_scorer(fp)
         rf = RandomForestClassifier()
-        rf_random = RandomizedSearchCV(estimator=rf, param_distributions=random_grid, n_iter=100, cv=4, verbose=2, random_state=42, n_jobs=-1)
+        rf_random = RandomizedSearchCV(estimator=rf, param_distributions=random_grid, scoring=score, n_iter=100, cv=4, verbose=2, random_state=42, n_jobs=-1)
         # Fit the random search model
         rf_random.fit(self.X_train, self.y_train)
         return rf_random.best_params_
+
 
     def get_fpr_tpr(self):
         prob_on_val = self.clf.predict_proba(self.X_val)[:,1]
